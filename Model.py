@@ -2,7 +2,11 @@ import numpy as np
 from matplotlib import pyplot as plt
 from PyQt5.QtCore import QThread
 from scipy.signal import argrelextrema
+from numba import njit
+import time 
 
+Pi = np.pi
+    
 class model(QThread):
     
     def __init__(self, epsilon, Z0, Z):
@@ -84,13 +88,13 @@ class model(QThread):
         
 class S11:
     c = 3e8 
-    Pi = np.pi
     
     def __init__(self, epsilon, Z0=50, Z=5-15j):
         self.e = epsilon
         self.Z0 = Z0
         self.Z = Z
         self.v = self.c/np.sqrt(epsilon)
+        self.times = []
         
     @staticmethod
     def read_from_table(fname='Mutual_capacitance.txt'):
@@ -113,10 +117,23 @@ class S11:
     
     def evaluate(self, Ca, Cb, Cab, theta, dB=True):#pF, pF, pF, degrees
         v = self.v
-        Pi = self.Pi
         Z = self.Z
         Z0 = self.Z0
-        
+        t = time.time()
+        self.S11 = self._evaluate(Ca, Cb, Cab, theta, v, Z, Z0)
+        self.times.append(time.time()-t)
+        self.abs_S11 = self._abs(self.S11)
+        if dB:
+            self.abs_S11_dB = self._2dB(self.abs_S11)
+            ans = self.abs_S11_dB
+        else:
+            self.abs_S11_dB = None
+            ans = self.abs_S11
+        return ans
+    
+    @staticmethod
+    @njit(parallel=True)
+    def _evaluate(Ca, Cb, Cab, theta, v, Z, Z0):
         Ca=Ca*1e-12
         Cb=Cb*1e-12
         Cab=Cab*1e-12
@@ -147,12 +164,15 @@ class S11:
         c = c1*a2 + d1*c2
         d = c1*b2 + d1*d2
         
-        self.S11 = (a + b/Z0 - c*Z0 - d)/(a + b/Z0 + c*Z0 + d)
-        self.abs_S11 = abs(self.S11)
-        self.abs_S11_dB = 20*np.log10(self.abs_S11)
-        if dB:
-            ans = self.abs_S11_dB
-        else:
-            ans = self.abs_S11
-        return ans
+        S11 = (a + b/Z0 - c*Z0 - d)/(a + b/Z0 + c*Z0 + d)
+        return S11
     
+    @staticmethod
+    @njit(parallel=True)
+    def _abs(S11):
+        return np.abs(S11)
+    
+    @staticmethod
+    @njit(parallel=True)
+    def _2dB(abs_S11):
+        return 20*np.log10(abs_S11)
